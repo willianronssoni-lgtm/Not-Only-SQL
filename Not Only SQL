@@ -1,0 +1,168 @@
+import json
+import os
+import sys
+import urllib.request
+
+if not os.path.exists("serviceAccountKey.json"):
+    print("\n❌ ERRO: O arquivo 'serviceAccountKey.json' nao foi encontrado!")
+    print("👉 Certifique-se de salvar sua chave do Firebase com este nome exato na mesma pasta do script.\n")
+    sys.exit(1)
+
+try:
+    with open("serviceAccountKey.json", "r") as f:
+        key_data = json.load(f)
+except Exception as e:
+    print(f"❌ Erro ao ler o arquivo JSON de credenciais: {e}")
+    sys.exit(1)
+
+PROJECT_ID = key_data.get("project_id")
+if not PROJECT_ID:
+    print("❌ ERRO: O 'project_id' nao foi encontrado dentro do arquivo serviceAccountKey.json.")
+    sys.exit(1)
+
+BASE_URL = f"https://googleapis.com{PROJECT_ID}/databases/(default)/documents/alunos"
+
+def requisicao_http(url, metodo="GET", dados=None):
+    req = urllib.request.Request(url, method=metodo)
+    req.add_header("Content-Type", "application/json")
+    
+    corpo = json.dumps(dados).encode("utf-8") if dados else None
+    try:
+        with urllib.request.urlopen(req, data=corpo) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except Exception as e:
+        print(f"❌ Erro na operacao de banco de dados: {e}")
+        return None
+
+def formatar_para_firestore(nome, turma, data_nasc, ativo):
+    return {
+        "fields": {
+            "nome": {"stringValue": nome},
+            "turma": {"stringValue": turma},
+            "dataNascimento": {"stringValue": data_nasc},
+            "ativo": {"booleanValue": ativo}
+        }
+    }
+
+def cadastrar_aluno():
+    print("\n--- CADASTRAR ALUNO ---")
+    nome = input("Nome: ")
+    turma = input("Turma: ")
+    data_nasc = input("Data de Nascimento (AAAA-MM-DD): ")
+    ativo = input("Aluno ativo? (S/N): ").strip().lower() in ["s", "sim"]
+
+    payload = formatar_para_firestore(nome, turma, data_nasc, ativo)
+    res = requisicao_http(BASE_URL, "POST", payload)
+    if res:
+        doc_name = res.get("name", "").split("/")[-1]
+        print(f"\n✅ Aluno cadastrado com sucesso! ID: {doc_name}")
+
+def listar_alunos():
+    print("\n--- LISTAR TODOS OS ALUNOS ---")
+    res = requisicao_http(BASE_URL, "GET")
+    if not res or "documents" not in res:
+        print("Nenhum aluno encontrado.")
+        return
+    
+    for doc in res["documents"]:
+        doc_id = doc.get("name", "").split("/")[-1]
+        fields = doc.get("fields", {})
+        nome = fields.get("nome", {}).get("stringValue", "")
+        turma = fields.get("turma", {}).get("stringValue", "")
+        nasc = fields.get("dataNascimento", {}).get("stringValue", "")
+        ativo = fields.get("ativo", {}).get("booleanValue", False)
+        print(f"ID: {doc_id} | Nome: {nome} | Turma: {turma} | Nasc: {nasc} | Ativo: {ativo}")
+
+def atualizar_aluno():
+    print("\n--- ATUALIZAR ALUNO ---")
+    doc_id = input("Digite o ID do aluno: ")
+    url = f"{BASE_URL}/{doc_id}"
+    
+    nome = input("Novo Nome: ")
+    turma = input("Nova Turma: ")
+    data_nasc = input("Nova Data (AAAA-MM-DD): ")
+    ativo = input("Ativo? (S/N): ").strip().lower() in ["s", "sim"]
+
+    payload = formatar_para_firestore(nome, turma, data_nasc, ativo)
+    res = requisicao_http(url, "PATCH", payload)
+    if res:
+        print("✅ Aluno atualizado com sucesso!")
+
+def excluir_aluno():
+    print("\n--- EXCLUIR ALUNO ---")
+    doc_id = input("Digite o ID do aluno: ")
+    url = f"{BASE_URL}/{doc_id}"
+    
+    confirmar = input("Tem certeza que deseja deletar? (S/N): ").strip().lower()
+    if confirmar in ["s", "sim"]:
+        req = urllib.request.Request(url, method="DELETE")
+        try:
+            urllib.request.urlopen(req)
+            print("✅ Aluno removido com sucesso!")
+        except Exception as e:
+            print(f"❌ Erro ao deletar: {e}")
+
+def consultar_por_turma():
+    print("\n--- CONSULTAR POR TURMA ---")
+    turma_alvo = input("Digite a turma: ")
+    res = requisicao_http(BASE_URL, "GET")
+    if not res or "documents" not in res:
+        print("Nenhum aluno encontrado.")
+        return
+    
+    encontrado = False
+    for doc in res["documents"]:
+        fields = doc.get("fields", {})
+        turma = fields.get("turma", {}).get("stringValue", "")
+        if turma == turma_alvo:
+            encontrado = True
+            doc_id = doc.get("name", "").split("/")[-1]
+            nome = fields.get("nome", {}).get("stringValue", "")
+            print(f"ID: {doc_id} | Nome: {nome} | Turma: {turma}")
+    if not encontrado:
+        print("Nenhum aluno encontrado nesta turma.")
+
+def consultar_por_data():
+    print("\n--- CONSULTAR POR DATA ---")
+    data_alvo = input("Digite a data (AAAA-MM-DD): ")
+    res = requisicao_http(BASE_URL, "GET")
+    if not res or "documents" not in res:
+        print("Nenhum aluno encontrado.")
+        return
+    
+    encontrado = False
+    for doc in res["documents"]:
+        fields = doc.get("fields", {})
+        data_nasc = fields.get("dataNascimento", {}).get("stringValue", "")
+        if data_nasc == data_alvo:
+            encontrado = True
+            doc_id = doc.get("name", "").split("/")[-1]
+            nome = fields.get("nome", {}).get("stringValue", "")
+            print(f"ID: {doc_id} | Nome: {nome} | Nasc: {data_nasc}")
+    if not encontrado:
+        print("Nenhum aluno encontrado com essa data.")
+
+def menu():
+    while True:
+        print("\n=============================")
+        print("   FIRESTORE API REST - CRUD ")
+        print("=============================")
+        print("1. Cadastrar Aluno (CREATE)")
+        print("2. Listar Alunos (READ)")
+        print("3. Atualizar Aluno (UPDATE)")
+        print("4. Excluir Aluno (DELETE)")
+        print("5. Consultar por Turma")
+        print("6. Consultar por Data de Nascimento")
+        print("0. Sair")
+        
+        opcao = input("Escolha uma opcao: ").strip()
+        if opcao == "1": cadastrar_aluno()
+        elif opcao == "2": listar_alunos()
+        elif opcao == "3": atualizar_aluno()
+        elif opcao == "4": excluir_aluno()
+        elif opcao == "5": consultar_por_turma()
+        elif opcao == "6": consultar_por_data()
+        elif opcao == "0": break
+
+if __name__ == "__main__":
+    menu()
